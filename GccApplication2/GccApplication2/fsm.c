@@ -5,7 +5,6 @@
 #include "keypad.h"
 #include "timer.h"
 
-
 #include <ctype.h>
 #include <string.h>
 

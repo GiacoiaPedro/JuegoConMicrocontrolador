@@ -27,14 +27,31 @@ static fsm_game state;
 static char secretWord[6]; //Array de 6 caracteres ya que almacena la palabra de 5 caracteres + el caracter final /0
 static uint8_t index;
 static char lastCharTyped;
-static uint8_t t_ref;
+static uint32_t t_ref;
 static char typedWord[6];  // Buffer para la palabra ingresada por el usuario
 static uint8_t asciiDigits[3];  // Almacena los dígitos ingresados (0-9)
 static uint8_t asciiIndex=0;    //index para el vector que almacena los valores ingresados por keypad que luego se transforman en ascii
 static char dummyKey = '\0';
 static char lastKeyPressed = '\0';
 
+static uint8_t index, errors;
+static uint8_t char_ready;
+
 //Metodos auxiliares
+
+static void lcd_show_word(void)
+{
+	LCDclr();
+	LCDGotoXY(0,0);
+	LCDstring((uint8_t *)secretWord, 5);
+}
+
+static void lcd_prepare_input(void)
+{
+	LCDclr();
+	LCDGotoXY(0,0); 
+	LCDGotoXY(0,1);
+}
 
 
 static void lcd_idle(void)
@@ -76,23 +93,24 @@ void clk_tick(void)
 	//Estado idle. Muestra "Presione * para comenzar..."
 	case ST_IDLE:
 		if(keypad_scan(&key) && key == '*'){
-			state = ST_SHOW_WORD;			
+			dict_seed(ticksMS);
+			dict_get_random_word(secretWord);
+			lcd_show_word();
+			t_ref = ticksMS;
+			index = errors = 0;
+			char_ready = 0;
+			state = ST_SHOW_WORD;
+			return;		
 		}
 		break;
 
 	case ST_SHOW_WORD:
-		dict_seed(ticksMS);
-		dict_get_random_word(secretWord);
-		LCDclr();
-		LCDGotoXY(0,0);
-		LCDstring((uint8_t *) secretWord, 5);	//Outputs string to LCD			
-		_delay_ms(2000);  // Espera de 2000 ms (2 segundos)
-		// Preparar para el siguiente estado
-		index = 0;
-		memset(typedWord, 0, sizeof(typedWord));  // Limpiar buffer de entrada
-		LCDclr();
-		LCDGotoXY(0,0);                                          
-		state = ST_TYPING;                        // Cambiar de estado
+		if (ticksMS - t_ref >= 2000) {
+			lcd_prepare_input();
+			t_ref = ticksMS;
+			memset(typedWord, 0, sizeof(typedWord));  // Limpiar buffer de entrada
+			state = ST_TYPING;
+		}
 		break;
 	
 

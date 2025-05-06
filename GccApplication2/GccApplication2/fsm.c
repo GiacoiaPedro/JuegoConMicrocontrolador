@@ -1,10 +1,10 @@
-
 #include "fsm.h"
 #include "dict.h"
 #include "lcd.h"
 #include "keypad.h"
 #include "timer.h"
 
+#include <stdio.h>
 #include <ctype.h>
 #include <string.h>
 
@@ -26,32 +26,17 @@ typedef enum{
 static fsm_game state;
 static char secretWord[6]; //Array de 6 caracteres ya que almacena la palabra de 5 caracteres + el caracter final /0
 static uint8_t index;
-static char lastCharTyped;
-static uint32_t t_ref;
+//static char lastCharTyped;
+static uint8_t t_ref;
 static char typedWord[6];  // Buffer para la palabra ingresada por el usuario
 static uint8_t asciiDigits[3];  // Almacena los dígitos ingresados (0-9)
 static uint8_t asciiIndex=0;    //index para el vector que almacena los valores ingresados por keypad que luego se transforman en ascii
-static char dummyKey = '\0';
+//static char dummyKey = '\0';
 static char lastKeyPressed = '\0';
-
-static uint8_t index, errors;
-static uint8_t char_ready;
+static uint8_t errorCount = 0; //para contar los errores en el ingreso de contraseña
+static uint8_t firstime=1;
 
 //Metodos auxiliares
-
-static void lcd_show_word(void)
-{
-	LCDclr();
-	LCDGotoXY(0,0);
-	LCDstring((uint8_t *)secretWord, 5);
-}
-
-static void lcd_prepare_input(void)
-{
-	LCDclr();
-	LCDGotoXY(0,0); 
-	LCDGotoXY(0,1);
-}
 
 
 static void lcd_idle(void)
@@ -59,7 +44,7 @@ static void lcd_idle(void)
 	LCDclr();
 	LCDGotoXY(0,0);
 	char str1[] = "Presione * para";
-	char str2[] = "iniciar...";
+	char str2[] = "    iniciar...";
 	LCDstring((uint8_t *)str1, strlen(str1));
 	LCDGotoXY(0,1);
 	LCDstring((uint8_t *)str2, strlen(str2));
@@ -79,7 +64,13 @@ uint8_t digitsToAscii(const uint8_t digits[], uint8_t count) {
 }
 
 void fsm_init(void){
-	state = ST_IDLE;
+	 state = ST_IDLE;
+	 errorCount = 0;
+	 index = 0;
+	 t_ref = 0;
+	 firstime=1;
+	 memset(secretWord, 0, sizeof(secretWord));
+	 memset(typedWord, 0, sizeof(typedWord));
 	lcd_idle();
 }
 
@@ -93,81 +84,122 @@ void clk_tick(void)
 	//Estado idle. Muestra "Presione * para comenzar..."
 	case ST_IDLE:
 		if(keypad_scan(&key) && key == '*'){
-			dict_seed(ticksMS);
-			dict_get_random_word(secretWord);
-			lcd_show_word();
-			t_ref = ticksMS;
-			index = errors = 0;
-			char_ready = 0;
-			state = ST_SHOW_WORD;
-			return;		
+			state = ST_SHOW_WORD;			
 		}
 		break;
 
 	case ST_SHOW_WORD:
-		if (ticksMS - t_ref >= 2000) {
-			lcd_prepare_input();
-			t_ref = ticksMS;
-			memset(typedWord, 0, sizeof(typedWord));  // Limpiar buffer de entrada
-			state = ST_TYPING;
-		}
+		dict_seed(ticksMS);
+		dict_get_random_word(secretWord);
+		LCDclr();
+		LCDGotoXY(0,0);
+		LCDstring((uint8_t *) secretWord, 5);	//Outputs string to LCD			
+		_delay_ms(2000);  // Espera de 2000 ms (2 segundos)
+		// Preparar para el siguiente estado
+		index = 0;
+		memset(typedWord, 0, sizeof(typedWord));  // Limpiar buffer de entrada
+		LCDclr();
+		LCDGotoXY(0,0);                                          
+		state = ST_TYPING;                        // Cambiar de estado
 		break;
 	
 
-	case ST_TYPING:
-		if(keypad_scan(&key)) {
-			static char lastKeyPressed = '\0';
-
-			if(key != lastKeyPressed) {
-				lastKeyPressed = key;
-				asciiDigits[asciiIndex] = key;
-				asciiIndex++;
-				asciiIndex = asciiIndex % 3;
-				lastCharTyped = digitsToAscii((uint8_t*)asciiDigits, asciiIndex);
-				LCDsendChar(key);
-
-				if(key == '#') {
-					asciiIndex = 0;
-					LCDclr();
-					state = ST_CHECK;
+case ST_TYPING:
+if(keypad_scan(&key)) {
+	if(key != lastKeyPressed) {
+		lastKeyPressed = key;
+		if(key >= '0' && key <= '9' && asciiIndex < 3) {
+			asciiDigits[asciiIndex++] = key - '0';
+			if (firstime==1){
+				LCDGotoXY(0,1);
+				firstime=0;
+			}
+			LCDsendChar(key); // Muestra dígito ingresado
+		}
+		else if(key == '#') {
+			char enteredChar = digitsToAscii(asciiDigits, asciiIndex);
+			if((enteredChar >= 'A' && enteredChar <= 'Z') ||
+			(enteredChar >= 'a' && enteredChar <= 'z')) {
+				typedWord[index] = enteredChar;
+				state = ST_CHECK; // Pasar a verificación
+				} else {
+				errorCount++;
+				LCDclrLine(1);
+				LCDGotoXY(0,1);
+				
+				if(errorCount >= 3) {
+					state = ST_DEFEAT;
+					t_ref = ticksMS;
 				}
 			}
+			
+			asciiIndex = 0; // Reset para nuevo carácter
+			memset(asciiDigits, 0, sizeof(asciiDigits));
 		}
-
-		// MOVER AQUÍ PARA DETECTAR CUANDO SE SUELTA LA TECLA
-		if(!keypad_scan(&dummyKey)) {
-			lastKeyPressed = '\0';
-		}
-	break;
+	}
+	} else {
+	lastKeyPressed = '\0';
+}
+break;
 
 	
 	case ST_CHECK:
-	if (strcmp(secretWord, typedWord) == 0) {
-		state = ST_VICTORY;
-		t_ref = ticksMS;
-		LCDclr();
+	if(typedWord[index] == secretWord[index]) {
+		index++;
+		
+		LCDclrLine(0);
 		LCDGotoXY(0,0);
-		LCDstring((uint8_t *)"CORRECTO!", 9);
-		} else {
-		state = ST_DEFEAT;
-		t_ref = ticksMS;
-		LCDclr();
-		LCDGotoXY(0,0);
-		LCDstring((uint8_t *)"INCORRECTO!", 11);
+		LCDstring((uint8_t *)typedWord, index); //muestro el progreso		
+		LCDclrLine(1); //limpio linea inferior
+		
+		if (index == 5) {
+			state = ST_VICTORY;
+			t_ref = ticksMS;
+		} 
+		else {
+				state=ST_TYPING;
+			 }
+	}
+	else {
+			errorCount++;
+			LCDclrLine(1); //limpio linea inferior
+			LCDGotoXY(0,1);		
+			LCDstring((uint8_t *)"INCORRECTO!", 11);
+			
+			if (errorCount >= 3){
+				state = ST_DEFEAT;
+				t_ref = ticksMS;
+			}
+			else {
+				state=ST_TYPING;
+				LCDGotoXY(0,1);
+				LCDclrLine(1);
+			}
 	}
 	break;
 	
 	case ST_VICTORY:
+		LCDclr();
+		LCDGotoXY(0, 0);
+		LCDstring((uint8_t *)"VICTORIA!", 9);
+		uint32_t elapsedTime = (ticksMS - t_ref) / 1000;
+		char timeStr[16];
+		snprintf(timeStr, sizeof(timeStr), "Tiempo: %lu seg", elapsedTime);
+		LCDGotoXY(0, 1);
+		LCDstring((uint8_t *)timeStr, strlen(timeStr));  // Muestra el tiempo
+		_delay_ms(5000);
 	if (ticksMS - t_ref >= TIME_FINAL) {
-		state = ST_IDLE;
-		lcd_idle();
+		fsm_init();
 	}
 	break;
 
 	case ST_DEFEAT:
+	LCDclr();
+	LCDGotoXY(0, 0);
+	LCDstring((uint8_t *)"DERROTA!", 8);
+	_delay_ms(5000);
 	if (ticksMS - t_ref >= TIME_FINAL) {
-		state = ST_IDLE;
-		lcd_idle();
+		fsm_init(); 
 	}
 	break;
 

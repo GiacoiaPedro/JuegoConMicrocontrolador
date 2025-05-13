@@ -34,7 +34,9 @@ static uint8_t asciiIndex;
 static uint32_t t_ref;            //timestamp en ms
 static char lastKeyPressed = '\0';
 static char lastCharTyped;
-static uint8_t first;             
+static uint8_t first;
+static uint32_t t_typing_start;
+             
 
 
 //Metodos auxiliares
@@ -99,20 +101,23 @@ void clk_tick(void)
         break;
 
     case ST_SHOW_WORD:
-        if (first) {
-            first = 0;
-            lcd_show_word();
-            t_ref = ticksMS;
-        }
-        if (ticksMS - t_ref >= TIME_SHOW_WORD) {
-            lcd_prepare_input();
-            t_ref = ticksMS;     
-            state = ST_TYPING;
-            lastKeyPressed = '\0';
-            asciiIndex = 0;
-            memset(asciiDigits,0,sizeof(asciiDigits));
-        }
-        break;
+		if (first) {
+			first = 0;
+			lcd_show_word();
+			t_ref = ticksMS;
+		}
+		if (ticksMS - t_ref >= TIME_SHOW_WORD) {
+			lcd_prepare_input();
+			// aquí acaba la muestra de la palabra: arrancamos el contador
+			t_typing_start = ticksMS;
+			// reutilizamos t_ref para medir el display final
+			t_ref = ticksMS;
+			state = ST_TYPING;
+			lastKeyPressed = '\0';
+			asciiIndex = 0;
+			memset(asciiDigits, 0, sizeof(asciiDigits));
+		}
+		break;
 
     case ST_TYPING:
         if (keypad_scan(&key)) {
@@ -175,28 +180,32 @@ void clk_tick(void)
         break;
 
     case ST_VICTORY:
-        if (first) {
-            first = 0;
-            LCDclr();
-            LCDGotoXY(0,0);
-            LCDstring((uint8_t *)"VICTORIA!", 9);
-            t_ref = ticksMS;
-        }
-        {
-            static uint8_t lastSec = 255;
-            uint8_t sec = (ticksMS - t_ref)/1000;
-            if (sec != lastSec) {
-                lastSec = sec;
-                char buf[16];
-                snprintf(buf,sizeof(buf),"Tiempo: %u s",sec);
-                lcd_line_clear(1);
-                LCDstring((uint8_t *)buf, strlen(buf));
-            }
-        }
-        if (ticksMS - t_ref >= TIME_FINAL) {
-            state = ST_IDLE; first = 1;
-        }
-        break;
+    if (first) {
+	    first = 0;
+	    LCDclr();
+	    LCDGotoXY(0,0);
+	    LCDstring((uint8_t *)"VICTORIA!", 9);
+
+	    // calculamos el tiempo total de tipiado
+	    uint32_t elapsed_ms = ticksMS - t_typing_start;
+	    uint32_t seconds = elapsed_ms / 1000;
+
+	    char buf[16];
+	    snprintf(buf, sizeof(buf), "Tiempo: %lu s", seconds);
+	    LCDGotoXY(0,1);
+	    LCDstring((uint8_t *)buf, strlen(buf));
+
+	    // iniciamos el temporizador para la pantalla final
+	    t_ref = ticksMS;
+    }
+
+    // tras TIME_FINAL ms volvemos a IDLE
+    if (ticksMS - t_ref >= TIME_FINAL) {
+	    state = ST_IDLE;
+	    first = 1;
+    }
+    break;
+
 
     case ST_DEFEAT:
         if (first) {

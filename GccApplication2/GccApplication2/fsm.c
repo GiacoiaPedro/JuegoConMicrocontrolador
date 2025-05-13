@@ -108,9 +108,7 @@ void clk_tick(void)
 		}
 		if (ticksMS - t_ref >= TIME_SHOW_WORD) {
 			lcd_prepare_input();
-			// aquí acaba la muestra de la palabra: arrancamos el contador
 			t_typing_start = ticksMS;
-			// reutilizamos t_ref para medir el display final
 			t_ref = ticksMS;
 			state = ST_TYPING;
 			lastKeyPressed = '\0';
@@ -186,7 +184,6 @@ void clk_tick(void)
 	    LCDGotoXY(0,0);
 	    LCDstring((uint8_t *)"VICTORIA!", 9);
 
-	    // calculamos el tiempo total de tipiado
 	    uint32_t elapsed_ms = ticksMS - t_typing_start;
 	    uint32_t seconds = elapsed_ms / 1000;
 
@@ -195,11 +192,9 @@ void clk_tick(void)
 	    LCDGotoXY(0,1);
 	    LCDstring((uint8_t *)buf, strlen(buf));
 
-	    // iniciamos el temporizador para la pantalla final
 	    t_ref = ticksMS;
     }
 
-    // tras TIME_FINAL ms volvemos a IDLE
     if (ticksMS - t_ref >= TIME_FINAL) {
 	    state = ST_IDLE;
 	    first = 1;
